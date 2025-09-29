@@ -1,3 +1,3 @@
 # AI Code Editor Prompt Configuration Standardization Proposal
 
-English | [简体中文](./README.zh-CN.md)
+[English](./README.md) | [简体中文]
