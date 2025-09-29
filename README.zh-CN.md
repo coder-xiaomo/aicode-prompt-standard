@@ -17,22 +17,58 @@
 2. **配置同步困难**：团队成员使用不同编辑器时需要维护多份相同内容
 3. **版本控制冲突**：不同编辑器的配置文件需要分别添加到 `.gitignore`
 4. **迁移成本高**：切换编辑器时需要重新配置提示词
+5. **单体仓库挑战**：单体仓库中的不同项目需要不同的提示词配置
 
-## Proposed 标准
+## 提案标准
 
 ### 核心标准路径
 
 ```
 .prompt/
   ├─ rules/
-  │  ├─ project[.<editor-identifer>].md     # 项目级提示词（主要文件）
-  │  ├─ context[.<editor-identifer>].md     # 上下文规则（可选）
-  │  └─ code_style[.<editor-identifer>].md  # 代码风格规范（可选）
+  │  ├─ project[/[<自定义文件名>]][.<编辑器标识>].md     # 项目级提示词（主要文件）
+  │  ├─ context[/[<自定义文件名>]][.<编辑器标识>].md     # 上下文规则（可选）
+  │  └─ code_style[/[<自定义文件名>]][.<编辑器标识>].md  # 代码风格规范（可选）
   ├─ config.json                            # 配置文件
   └─ README.md                              # 说明文档（可选）
 ```
 
-其中，`[.<editor-identifer>]` 是编辑器特定配置。不添加则是全局使用的公共提示词文件。
+其中，`[.<编辑器标识>]` 是编辑器特定配置。不添加则是全局使用的公共提示词文件。
+
+### 单体仓库支持与路径特定规则
+
+对于单体仓库项目，使用 `.prompt-config.yaml` 中的 glob 模式配置路径特定规则：
+
+```yaml
+version: 1.0
+
+prompt:
+  rules:
+    - scope: "packages/frontend/**"  # 前端包
+      files:
+        - .prompt/frontend-rules.md
+        - docs/frontend/ai-context.md
+
+    - scope: "packages/backend/**"   # 后端包
+      files:
+        - .prompt/backend-rules.md
+        - "!docs/frontend/**"  # 排除前端文档
+
+    - scope: "**/legacy/**"          # 任何遗留目录
+      files:
+        - .prompt/legacy-overrides.md
+
+  default:  # 未匹配路径的默认规则
+    files:
+      - .prompt/general.md
+      - docs/ai-guidelines.md
+```
+
+#### 规则评估
+1. **特异性**：精确路径 > 通配符模式 > 默认规则
+2. **排除**：否定模式（`!路径`）排除文件
+3. **就近原则**：嵌套配置中最接近的 `.promptconfig.yaml` 生效
+4. **合并**：数组会合并，对象会深度合并
 
 ### 配置示例
 
@@ -51,7 +87,7 @@
 
 **高级配置（多文件结构）：**
 
-当提示词内容较多，需要拆分成多个文件时，可以创建对应目录，将提示词按照自定义目录结构进行分类。同样的，也以 `[.<editor-identifer>].md` 结尾。所有的文件都是可选的。
+当提示词内容较多，需要拆分成多个文件时，可以创建对应目录，将提示词按照自定义目录结构进行分类。同样的，也以 `[.<编辑器标识>].md` 结尾。所有的文件都是可选的。
 
 ```
 .prompt/
@@ -81,6 +117,7 @@
 2. **编辑器特定文件**：`.prompt/rules/project.{editor}.md`（按编辑器加载）
 3. **目录结构**：支持子目录组织，`index.md` 作为目录入口文件
 4. **合并策略**：所有匹配的文件内容会被合并，编辑器特定配置会扩展全局配置
+5. **路径特定规则**：对于单体仓库，使用 glob 模式为不同路径应用不同的提示词
 
 ## 配置文件格式 (`.prompt/config.json`)
 
@@ -171,7 +208,25 @@ fi
     "context.md",
     "context.vscode.md"
   ],
-  "aiPrompts.mergeStrategy": "smart"
+  "aiPrompts.mergeStrategy": "smart",
+  "aiPrompts.scopeAware": true, // 启用单体仓库路径感知加载
+  "aiPrompts.debug": false // 显示已加载提示词的调试信息
+}
+```
+
+### 编辑器实现示例
+
+```javascript
+// 范围匹配的伪代码
+function getApplicablePrompts(filePath, config) {
+  const rules = config.rules.filter(rule =>
+    micromatch.isMatch(filePath, rule.scope)
+  );
+
+  // 按特异性排序（更具体的模式优先）
+  rules.sort((a, b) => compareSpecificity(a.scope, b.scope));
+
+  return rules.flatMap(rule => rule.files);
 }
 ```
 
@@ -181,6 +236,7 @@ fi
    - 配置验证工具：`prompt-validator`
    - 文件合并工具：`prompt-merger`
    - 迁移辅助工具：`prompt-migrate`
+   - 范围调试工具：`prompt-debug`（显示哪些提示词应用于哪些路径）
 
 2. **编辑器插件**：
    - VSCode 扩展：`vscode-prompt-config-integration`
@@ -189,6 +245,7 @@ fi
 3. **模板库**：
    - 常见项目类型的配置模板
    - 各语言的最佳实践示例
+   - 单体仓库配置示例
 
 ## 配置文件详细规范
 
@@ -311,6 +368,9 @@ prompt-validate --generate-report
 
 # 检查编辑器兼容性
 prompt-validate --check-editor vscode cursor
+
+# 调试路径匹配（用于单体仓库）
+prompt-debug --path packages/frontend/src/index.js
 ```
 
 ## 收益分析
@@ -320,6 +380,7 @@ prompt-validate --check-editor vscode cursor
 - ✅ **可维护性**：集中管理，单一事实来源
 - ✅ **灵活性**：支持全局配置和编辑器特定扩展
 - ✅ **协作性**：团队配置标准化，易于共享
+- ✅ **单体仓库支持**：为单体仓库中的不同项目提供路径特定规则
 
 ### 对编辑器厂商
 - ✅ **互操作性**：降低用户迁移成本，提高用户粘性
@@ -334,18 +395,21 @@ prompt-validate --check-editor vscode cursor
 - [ ] 开发配置验证工具：`@prompt-standard/validator`
 - [ ] 编写详细文档和示例
 - [ ] 建立社区讨论组（Discord/GitHub Discussions）
+- [ ] 为核心库添加单体仓库路径匹配支持
 
 ### 短期目标（1-3月）
 - [ ] 争取 2-3 个主流编辑器支持
 - [ ] 创建流行项目的配置模板
 - [ ] 开发 IDE 插件原型
 - [ ] 建立自动化测试流程
+- [ ] 添加单体仓库示例和最佳实践
 
 ### 长期愿景（6-12月）
 - [ ] 成为事实标准，被多个编辑器原生支持
 - [ ] 建立认证程序和兼容性测试
 - [ ] 扩展支持更多 AI 开发工具
 - [ ] 开发图形化配置管理工具
+- [ ] 具有继承和覆盖规则的高级单体仓库支持
 
 ## 技术支持
 
@@ -359,6 +423,9 @@ npm install -g @prompt-standard/validator
 
 # 迁移工具安装
 npm install -g @prompt-standard/migrate
+
+# 调试工具安装
+npm install -g @prompt-standard/debug
 ```
 
 ### API 示例
@@ -371,6 +438,9 @@ const prompts = await loader.loadForEditor('vscode')
 
 const validator = new PromptValidator()
 const results = await validator.validate(prompts)
+
+// 用于单体仓库路径感知加载
+const pathSpecificPrompts = await loader.loadForPath('packages/frontend/src/index.js', 'vscode')
 ```
 
 ## 呼吁参与
@@ -381,26 +451,33 @@ const results = await validator.validate(prompts)
 - 实现原生标准支持
 - 提供反馈和改进建议
 - 参与标准规范的制定
+- 添加单体仓库路径感知提示词加载功能
 
 ### 对于开源项目
 - 率先采用标准配置
 - 贡献项目配置模板
 - 分享使用经验和最佳实践
+- 提供单体仓库用例
 
 ### 对于社区成员
 - 测试和报告问题
 - 参与文档编写和翻译
 - 开发辅助工具和插件
+- 贡献单体仓库支持功能
 
 ### 对于企业用户
 - 提供实际业务需求
 - 分享企业级应用场景
 - 参与标准推广和实施
+- 贡献大规模单体仓库需求
 
 **参与方式**：
 - 📝 提交 Issue 和 Feature Request
 - 🔄 提交 Pull Request
 - 💬 加入社区讨论
 - 🚀 分享你的配置案例
+- 🏗️ 贡献单体仓库解决方案
 
 **GitHub 仓库**: https://github.com/aicode-standard/prompt-config
+
+加入 https://github.com/aicode-standard/prompt-config/issues 的讨论！

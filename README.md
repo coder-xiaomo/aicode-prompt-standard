@@ -17,6 +17,7 @@ Create a unified standard for AI code editor prompt configuration files to addre
 2. **Configuration Synchronization Difficulties**: Team members using different editors need to maintain multiple copies of the same content
 3. **Version Control Conflicts**: Configuration files from different editors need to be separately added to `.gitignore`
 4. **High Migration Costs**: Switching editors requires reconfiguring prompts
+5. **Monorepo Challenges**: Different projects within a monorepo require different prompt configurations
 
 ## Proposed Standard
 
@@ -25,14 +26,49 @@ Create a unified standard for AI code editor prompt configuration files to addre
 ```
 .prompt/
   ├─ rules/
-  │  ├─ project[.<editor-identifer>].md     # Project-level prompts (primary file)
-  │  ├─ context[.<editor-identifer>].md     # Context rules (optional)
-  │  └─ code_style[.<editor-identifer>].md  # Code style guidelines (optional)
+  │  ├─ project[/[<custom-filename>]][.<editor-identifer>].md     # Project-level prompts (primary file)
+  │  ├─ context[/[<custom-filename>]][.<editor-identifer>].md     # Context rules (optional)
+  │  └─ code_style[/[<custom-filename>]][.<editor-identifer>].md  # Code style guidelines (optional)
   ├─ config.json                            # Configuration file
   └─ README.md                              # Documentation (optional)
 ```
 
 The `[.<editor-identifer>]` indicates editor-specific configurations. When omitted, it represents globally shared prompt files.
+
+### Monorepo Support with Path-Specific Rules
+
+For monorepo projects, configure path-specific rules using glob patterns in `.prompt-config.yaml`:
+
+```yaml
+version: 1.0
+
+prompt:
+  rules:
+    - scope: "packages/frontend/**"  # Frontend packages
+      files:
+        - .prompt/frontend-rules.md
+        - docs/frontend/ai-context.md
+
+    - scope: "packages/backend/**"   # Backend packages
+      files:
+        - .prompt/backend-rules.md
+        - "!docs/frontend/**"  # Exclude frontend docs
+
+    - scope: "**/legacy/**"          # Any legacy directory
+      files:
+        - .prompt/legacy-overrides.md
+
+  default:  # Default rules for unmatched paths
+    files:
+      - .prompt/general.md
+      - docs/ai-guidelines.md
+```
+
+#### Rules Evaluation
+1. **Specificity**: Exact paths > wildcard patterns > default rules
+2. **Exclusion**: Negative patterns (`!path`) exclude files
+3. **Proximity**: Closest `.promptconfig.yaml` wins in nested configurations
+4. **Merge**: Arrays are merged, objects are deep-merged
 
 ### Configuration Examples
 
@@ -81,6 +117,7 @@ For the VSCode editor, in this example, the following markdown files will be loa
 2. **Editor-Specific Files**: `.prompt/rules/project.{editor}.md` (loaded by specific editors)
 3. **Directory Structure**: Supports subdirectory organization, with `index.md` as the directory entry file
 4. **Merge Strategy**: Content from all matching files will be merged, with editor-specific configurations extending global configurations
+5. **Path-Specific Rules**: For monorepos, uses glob patterns to apply different prompts to different paths
 
 ## Configuration File Format (`.prompt/config.json`)
 
@@ -171,7 +208,25 @@ Encourage editor vendors to natively support standard paths:
     "context.md",
     "context.vscode.md"
   ],
-  "aiPrompts.mergeStrategy": "smart"
+  "aiPrompts.mergeStrategy": "smart",
+  "aiPrompts.scopeAware": true, // Enable monorepo path-aware loading
+  "aiPrompts.debug": false // Show debug info about loaded prompts
+}
+```
+
+### Editor Implementation Example
+
+```javascript
+// Pseudocode for scope matching
+function getApplicablePrompts(filePath, config) {
+  const rules = config.rules.filter(rule =>
+    micromatch.isMatch(filePath, rule.scope)
+  );
+
+  // Sort by specificity (more specific patterns first)
+  rules.sort((a, b) => compareSpecificity(a.scope, b.scope));
+
+  return rules.flatMap(rule => rule.files);
 }
 ```
 
@@ -181,6 +236,7 @@ Encourage editor vendors to natively support standard paths:
    - Configuration validation tool: `prompt-validator`
    - File merging tool: `prompt-merger`
    - Migration assistance tool: `prompt-migrate`
+   - Scope debug tool: `prompt-debug` (shows which prompts apply to which paths)
 
 2. **Editor Plugins**:
    - VSCode extension: `vscode-prompt-config-integration`
@@ -189,6 +245,7 @@ Encourage editor vendors to natively support standard paths:
 3. **Template Library**:
    - Configuration templates for common project types
    - Best practice examples for various languages
+   - Monorepo configuration examples
 
 ## Detailed Configuration Specifications
 
@@ -311,6 +368,9 @@ prompt-validate --generate-report
 
 # Check editor compatibility
 prompt-validate --check-editor vscode cursor
+
+# Debug path matching (for monorepos)
+prompt-debug --path packages/frontend/src/index.js
 ```
 
 ## Benefits Analysis
@@ -320,6 +380,7 @@ prompt-validate --check-editor vscode cursor
 - ✅ **Maintainability**: Centralized management, single source of truth
 - ✅ **Flexibility**: Support for global configurations and editor-specific extensions
 - ✅ **Collaboration**: Standardized team configurations, easy sharing
+- ✅ **Monorepo Support**: Path-specific rules for different projects in a monorepo
 
 ### For Editor Vendors
 - ✅ **Interoperability**: Reduce user migration costs, increase user retention
@@ -334,18 +395,21 @@ prompt-validate --check-editor vscode cursor
 - [ ] Develop configuration validation tool: `@prompt-standard/validator`
 - [ ] Write detailed documentation and examples
 - [ ] Establish community discussion groups (Discord/GitHub Discussions)
+- [ ] Add monorepo path-matching support to core library
 
 ### Short-term Goals (1-3 months)
 - [ ] Gain support from 2-3 mainstream editors
 - [ ] Create configuration templates for popular projects
 - [ ] Develop IDE plugin prototypes
 - [ ] Establish automated testing processes
+- [ ] Add monorepo examples and best practices
 
 ### Long-term Vision (6-12 months)
 - [ ] Become a de facto standard, natively supported by multiple editors
 - [ ] Establish certification programs and compatibility testing
 - [ ] Extend support to more AI development tools
 - [ ] Develop graphical configuration management tools
+- [ ] Advanced monorepo support with inheritance and override rules
 
 ## Technical Support
 
@@ -359,6 +423,9 @@ npm install -g @prompt-standard/validator
 
 # Migration tool installation
 npm install -g @prompt-standard/migrate
+
+# Debug tool installation
+npm install -g @prompt-standard/debug
 ```
 
 ### API Examples
@@ -371,6 +438,9 @@ const prompts = await loader.loadForEditor('vscode')
 
 const validator = new PromptValidator()
 const results = await validator.validate(prompts)
+
+// For monorepo path-aware loading
+const pathSpecificPrompts = await loader.loadForPath('packages/frontend/src/index.js', 'vscode')
 ```
 
 ## Call for Participation
@@ -381,26 +451,33 @@ We invite participation from:
 - Implement native standard support
 - Provide feedback and improvement suggestions
 - Participate in standard specification development
+- Add monorepo path-aware prompt loading
 
 ### For Open Source Projects
 - Adopt standard configurations early
 - Contribute project configuration templates
 - Share usage experiences and best practices
+- Provide monorepo use cases
 
 ### For Community Members
 - Test and report issues
 - Participate in documentation writing and translation
 - Develop auxiliary tools and plugins
+- Contribute to monorepo support features
 
 ### For Enterprise Users
 - Provide real business requirements
 - Share enterprise-level application scenarios
 - Participate in standard promotion and implementation
+- Contribute large-scale monorepo requirements
 
 **Participation Methods**:
 - 📝 Submit Issues and Feature Requests
 - 🔄 Submit Pull Requests
 - 💬 Join community discussions
 - 🚀 Share your configuration examples
+- 🏗️ Contribute monorepo solutions
 
 **GitHub Repository**: https://github.com/aicode-standard/prompt-config
+
+Join the discussion in [GitHub Issues](https://github.com/aicode-standard/prompt-config/issues)!
